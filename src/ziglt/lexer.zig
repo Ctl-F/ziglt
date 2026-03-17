@@ -102,8 +102,50 @@ pub const Token = struct {
 };
 
 pub const Source = struct {
+    name: []const u8,
+    original: []const u8, // copy of the original slice
     input: []const u8, // rolling view of source (this will shrink with each token consumed)
     consumed: u32, // total characters already consumed
+
+    pub fn make(name: []const u8, source: []const u8) @This() {
+        if (source.len > @as(usize, @intCast(std.math.maxInt(u32)))) {
+            unreachable;
+        }
+
+        return @This(){
+            .name = name,
+            .original = source,
+            .input = source,
+            .consumed = 0,
+        };
+    }
+
+    pub fn getPosition(this: @This(), token: Token) struct { col: u32, line: u32 } {
+        var col: u32 = 0;
+        var line: u32 = 0;
+        var index = token.start;
+
+        while (index > 0) : (index -= 1) {
+            if (this.original[index] == '\n') {
+                line += 1;
+                continue;
+            }
+
+            if (line == 0) {
+                // measuring column still
+                col += 1;
+            }
+        }
+
+        return .{ .col = col, .line = line };
+    }
+
+    pub fn getLexme(this: @This(), token: Token) []const u8 {
+        const start: usize = @intCast(token.start);
+        const end = start + @as(usize, @intCast(token.len));
+
+        return this.original[start..end];
+    }
 };
 
 pub fn tokenize(src: *Source) Token {
