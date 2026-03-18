@@ -8,7 +8,7 @@ pub fn main() !void {
 
     const src = ziglt.Source.make("Testing", "1 * (2 + 199)");
 
-    var parser = ziglt.Parser.init(alloc, src);
+    var parser = try ziglt.Parser.init(alloc, src);
 
     const tree = try parser.parse();
     ziglt.printAST(tree);

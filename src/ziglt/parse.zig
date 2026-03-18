@@ -1,6 +1,7 @@
 const std = @import("std");
 const lexer = @import("lexer.zig");
 const bytecode = @import("bytecode.zig");
+const mem = @import("mem.zig");
 
 const Token = lexer.Token;
 
@@ -62,25 +63,34 @@ pub const ParserError = error{
 pub const Parser = struct {
     const This = @This();
 
-    allocator: std.mem.Allocator,
+    allocator: mem.SlabAllocator(ASTNode),
     source: lexer.Source,
     window: [2]Token = [_]Token{ Token.Eof, Token.Eof },
 
-    pub fn init(allocator: std.mem.Allocator, source: lexer.Source) This {
-        var inst = This{ .allocator = allocator, .source = source };
+    pub fn init(allocator: std.mem.Allocator, source: lexer.Source) !This {
+        // TODO: make a dynamic version of the slab allocator
+        const alloc = try mem.SlabAllocator(ASTNode).init(allocator, .{ .defaultObjectCapacity = 1024, .defaultStackCapacity = 512 });
+
+        var inst = This{ .allocator = alloc, .source = source };
         inst.window[0] = lexer.tokenize(&inst.source);
         inst.window[1] = lexer.tokenize(&inst.source);
         return inst;
     }
 
     fn peek(this: *This) Token {
+        std.debug.print("Peeking: '{s}'\n", .{this.source.getLexme(this.window[1])});
         return this.window[1];
     }
 
     fn next(this: *This) Token {
+        std.debug.print("Fetching: '{s}' ", .{this.source.getLexme(this.window[0])});
+
         const token = this.window[0];
         this.window[0] = this.window[1];
         this.window[1] = lexer.tokenize(&this.source);
+
+        std.debug.print(" << '{s}', '{s}'\n", .{ this.source.getLexme(this.window[0]), this.source.getLexme(this.window[1]) });
+
         return token;
     }
 
@@ -89,7 +99,7 @@ pub const Parser = struct {
     }
 
     fn newNode(this: *This, node: ASTNode) ParserError!*ASTNode {
-        const ptr = this.allocator.create(ASTNode) catch return error.AllocationError;
+        const ptr = this.allocator.create() catch return error.AllocationError;
         ptr.* = node;
         return ptr;
     }

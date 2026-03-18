@@ -141,6 +141,9 @@ pub const Source = struct {
     }
 
     pub fn getLexme(this: @This(), token: Token) []const u8 {
+        if (token.id == .Eof) return "<EOF>";
+        if (token.id == .Invalid) return "<ERR>";
+
         const start: usize = @intCast(token.start);
         const end = start + @as(usize, @intCast(token.len));
 
