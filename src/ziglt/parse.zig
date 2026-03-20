@@ -11,6 +11,19 @@ pub const BinaryOp = enum {
     Mul,
     Div,
     Mod,
+    CompareEq,
+    CompareNeq,
+    CompareLt,
+    CompareLe,
+    CompareGt,
+    CompareGe,
+    And,
+    Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitShiftL,
+    BitShiftR,
 };
 
 pub const UnaryOp = enum {
@@ -50,10 +63,19 @@ pub const ASTNode = union(enum) {
 };
 
 const Precedence = enum(u8) {
-    Lowest,
-    Sum,
-    Product,
-    Prefix,
+    Lowest, // values
+    Assign, // = += *= etc.
+    Or,
+    And,
+    Compare,
+    Bitwise, // & ^ | orelse catch
+    BitShift, // << >>
+    Sum, // + -
+    Product, // * / %
+    Prefix, // -X ~X !X &X
+    Initializer, // X{}
+    ErrorUnion, // a!b
+    Accessor, // X() X[] X.Y X.* X.?
 };
 
 pub const ParserError = error{
@@ -66,6 +88,7 @@ pub const Parser = struct {
     allocator: mem.SlabAllocator(ASTNode),
     source: lexer.Source,
     window: [2]Token = [_]Token{ Token.Eof, Token.Eof },
+    heldToken: ?Token = null,
 
     pub fn init(allocator: std.mem.Allocator, source: lexer.Source) !This {
         // TODO: make a dynamic version of the slab allocator
@@ -78,20 +101,26 @@ pub const Parser = struct {
     }
 
     fn peek(this: *This) Token {
-        std.debug.print("Peeking: '{s}'\n", .{this.source.getLexme(this.window[1])});
-        return this.window[1];
+        if (this.heldToken) |tok| return tok;
+        return this.window[0];
     }
 
     fn next(this: *This) Token {
-        std.debug.print("Fetching: '{s}' ", .{this.source.getLexme(this.window[0])});
+        if (this.heldToken) |tok| {
+            this.heldToken = null;
+            return tok;
+        }
 
         const token = this.window[0];
         this.window[0] = this.window[1];
         this.window[1] = lexer.tokenize(&this.source);
 
-        std.debug.print(" << '{s}', '{s}'\n", .{ this.source.getLexme(this.window[0]), this.source.getLexme(this.window[1]) });
-
         return token;
+    }
+
+    fn putBack(this: *This, tok: Token) void {
+        std.debug.assert(this.heldToken == null);
+        this.heldToken = tok;
     }
 
     fn hasNext(this: *This) bool {
@@ -106,8 +135,17 @@ pub const Parser = struct {
 
     fn getPrec(id: lexer.TokenID) Precedence {
         return switch (id) {
+            .Equal, .PlusEq, .MinusEq, .AsteriskEq, .ForwardSlEq, .PercentEq, .AmpEq, .PipeEq, .CaretEq, .LessLessEq, .GreaterGreaterEq => .Assign,
+            .Or => .Or,
+            .And => .And,
+            .DoubleEqual, .NotEqual, .Less, .LessEqual, .Greater, .GreaterEqual => .Compare,
+            .Amp, .Pipe, .Caret, .Orelse, .Catch => .Bitwise,
+            .LessLess, .GreaterGreater => .BitShift,
             .Plus, .Minus => .Sum,
             .Asterisk, .ForwardSlash, .Percent => .Product,
+            .LeftCurl => .Initializer,
+            .Bang => .ErrorUnion,
+            .LeftParen, .LeftBracket, .Period, .PeriodAst, .PeriodQuest => .Accessor,
             else => .Lowest,
         };
     }
@@ -172,6 +210,19 @@ pub const Parser = struct {
                     .Asterisk => .Mul,
                     .ForwardSlash => .Div,
                     .Percent => .Mod,
+                    .DoubleEqual => .CompareEq,
+                    .NotEqual => .CompareNeq,
+                    .Less => .CompareLt,
+                    .LessEqual => .CompareLe,
+                    .Greater => .CompareGt,
+                    .GreaterEqual => .CompareGe,
+                    .And => .And,
+                    .Or => .Or,
+                    .Amp => .BitAnd,
+                    .Pipe => .BitOr,
+                    .Caret => .BitXor,
+                    .LessLess => .BitShiftL,
+                    .GreaterGreater => .BitShiftR,
                     else => unreachable,
                 },
                 .left = left,
@@ -186,42 +237,36 @@ pub fn printAST(node: *const ASTNode) void {
 }
 
 fn printNode(node: *const ASTNode, prefix: []const u8, is_last: bool) void {
-    //const stdout = std.Io.getStdOut().writer();
-    var stdout_buffer: [2048]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
-    defer stdout.flush() catch unreachable;
-
     // branch drawing
     if (prefix.len > 0) {
-        stdout.print("{s}", .{prefix}) catch unreachable;
-        stdout.print("{s}", .{if (is_last) "└─ " else "├─ "}) catch unreachable;
+        std.debug.print("{s}", .{prefix});
+        std.debug.print("{s}", .{if (is_last) "└─ " else "├─ "});
     }
 
     switch (node.*) {
         .immediate => |imm| {
             switch (imm) {
-                .uint => |v| stdout.print("Int({d})\n", .{v}) catch unreachable,
-                .float => |v| stdout.print("Float({})\n", .{v}) catch unreachable,
-                .boolean => |v| stdout.print("Bool({})\n", .{v}) catch unreachable,
-                .string => |v| stdout.print("String(\"{s}\")\n", .{v}) catch unreachable,
-                .char => |v| stdout.print("Char({d})\n", .{v}) catch unreachable,
+                .uint => |v| std.debug.print("Int({d})\n", .{v}),
+                .float => |v| std.debug.print("Float({})\n", .{v}),
+                .boolean => |v| std.debug.print("Bool({})\n", .{v}),
+                .string => |v| std.debug.print("String(\"{s}\")\n", .{v}),
+                .char => |v| std.debug.print("Char({d})\n", .{v}),
             }
         },
 
         .identifier => |ident| {
-            stdout.print("Ident({s})\n", .{ident.lexme}) catch unreachable;
+            std.debug.print("Ident({s})\n", .{ident.lexme});
         },
 
         .unary => |u| {
-            stdout.print("Unary({s})\n", .{unaryOpToString(u.op)}) catch unreachable;
+            std.debug.print("Unary({s})\n", .{unaryOpToString(u.op)});
 
             const new_prefix = nextPrefix(prefix, is_last);
             printNode(u.expr, new_prefix, true);
         },
 
         .binary => |b| {
-            stdout.print("Binary({s})\n", .{binaryOpToString(b.op)}) catch unreachable;
+            std.debug.print("Binary({s})\n", .{binaryOpToString(b.op)});
 
             const new_prefix = nextPrefix(prefix, is_last);
 
@@ -238,6 +283,19 @@ fn binaryOpToString(op: BinaryOp) []const u8 {
         .Mul => "*",
         .Div => "/",
         .Mod => "%",
+        .CompareEq => "==",
+        .CompareNeq => "!=",
+        .CompareLt => "<",
+        .CompareLe => "<=",
+        .CompareGt => ">",
+        .CompareGe => ">=",
+        .And => "and",
+        .Or => "or",
+        .BitAnd => "&",
+        .BitOr => "|",
+        .BitXor => "^",
+        .BitShiftL => "<<",
+        .BitShiftR => ">>",
     };
 }
 
@@ -253,4 +311,31 @@ fn nextPrefix(current: []const u8, is_last: bool) []const u8 {
         current,
         suffix,
     }) catch unreachable;
+}
+
+test "parser basic expression" {
+    const src = lexer.Source.make("test", "1 * (2 + 199)");
+    var parser = try Parser.init(std.testing.allocator, src);
+    defer parser.allocator.deinit();
+    const tree = try parser.parse();
+    // No easy way to deep check the tree here without more helper functions,
+    // but at least we can check it doesn't crash and returns something.
+    try std.testing.expect(tree.* == .binary);
+    try std.testing.expect(tree.binary.op == .Mul);
+}
+
+test "parser precedence" {
+    const src = lexer.Source.make("test", "1 + 2 * 3 == 7");
+    var parser = try Parser.init(std.testing.allocator, src);
+    defer parser.allocator.deinit();
+    const tree = try parser.parse();
+
+    // 1 + (2 * 3) == 7
+    // Tree: ( (1 + (2 * 3)) == 7 )
+    try std.testing.expect(tree.* == .binary);
+    try std.testing.expect(tree.binary.op == .CompareEq);
+    try std.testing.expect(tree.binary.left.* == .binary);
+    try std.testing.expect(tree.binary.left.binary.op == .Add);
+    try std.testing.expect(tree.binary.left.binary.right.* == .binary);
+    try std.testing.expect(tree.binary.left.binary.right.binary.op == .Mul);
 }

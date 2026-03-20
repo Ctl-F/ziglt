@@ -24,6 +24,7 @@ pub const TokenID = enum {
     ImmediateFloat,
     ImmediateInteger,
     ImmediateString,
+    Or,
     Orelse,
     Pub,
     Return,
@@ -196,6 +197,7 @@ const Keywords = [_]TokenPattern{
     .{ .lexme = "fn", .result = .Fn },
     .{ .lexme = "if", .result = .If },
     .{ .lexme = "import", .result = .Import },
+    .{ .lexme = "or", .result = .Or },
     .{ .lexme = "orelse", .result = .Orelse },
     .{ .lexme = "pub", .result = .Pub },
     .{ .lexme = "return", .result = .Return },
@@ -582,6 +584,8 @@ fn consume(src: *Source, len: u32) void {
 
 fn makeSource(input: []const u8) Source {
     return .{
+        .name = "test",
+        .original = input,
         .input = input,
         .consumed = 0,
     };

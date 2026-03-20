@@ -9,11 +9,11 @@ pub const Source = lexer.Source;
 
 test "ziglt tests" {
     std.testing.refAllDecls(lexer);
+    std.testing.refAllDecls(parse);
 }
 
-// TODO: Debug parser+AST to figure out why it's complaining on allocator free
-// TODO: Implement custom slab allocator rather than using arena allocator
-//      this might fix the issue.
+// TODO: finish parser
+// TODO: Refactor alloctor to be a dynamicly-sized arena allocator
 // TODO: test parser
 // TODO: refactor parser to be a table based approach
 // TODO: fully design initial draft of ziglt
@@ -21,5 +21,5 @@ test "ziglt tests" {
 // TODO: bytecode design
 // TODO: vm implementation
 // TODO: bytecode emissions
-// TODO: optimizations
+// TODO: optimizations (pin-hole+macro-opcodes, pruning, constant folding + propogation)
 // TODO: jit backend
