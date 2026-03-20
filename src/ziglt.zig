@@ -22,4 +22,5 @@ test "ziglt tests" {
 // TODO: vm implementation
 // TODO: bytecode emissions
 // TODO: optimizations (pin-hole+macro-opcodes, pruning, constant folding + propogation)
+// TODO: Comptime evaluation
 // TODO: jit backend

@@ -48,6 +48,7 @@ pub const TokenID = enum {
     Amp, // &
     AmpEq, // &=
     Asterisk, // *
+    AsteriskAsterisk, // **
     AsteriskEq, // *=
     Bang, // !
     Caret, // ^
@@ -453,6 +454,7 @@ fn tokenizeOperator(src: *Source) Token {
         '*' => B: {
             const result = matchOperator(src, &.{
                 .{ .lexme = "*=", .result = .AsteriskEq },
+                .{ .lexme = "**", .result = .AsteriskAsterisk },
                 .{ .lexme = "*", .result = .Asterisk },
             }) orelse unreachable;
             break :B .{ result.id, result.len };
