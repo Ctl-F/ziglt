@@ -1,0 +1,34 @@
+const std = import("std");
+
+const Bar = struct {
+    const This = This();
+
+    a: i32,
+    b: i32 = 0,
+    c: i32 = 0,
+    d: f32 = 0,
+
+    pub fn foo(this: This) This {
+        // comment
+        return this;
+    }
+};
+
+const Foo = struct {
+    bar: Bar,
+
+    fn baz(this: This()) Bar {
+        return this.Bar.foo();
+    }
+};
+
+
+fn main() error!void {
+    const d = "This is a string\n  \"This is a newline\"";
+    const a: Foo = Foo{ .bar = Bar{ .a = 23 }, };
+
+    std.debug.print("{}\n", a.bar.foo().d);
+
+    _ = a;
+    return error.AlwaysFails;
+}

@@ -6,10 +6,12 @@ pub fn main() !void {
     defer allocator.deinit();
     const alloc = allocator.allocator();
 
-    const src = ziglt.Source.make("Testing", "1 * (2 + 199)");
+    const src = ziglt.Source.make("Testing", testSource);
 
     var parser = try ziglt.Parser.init(alloc, src);
 
     const tree = try parser.parse();
     ziglt.printAST(tree);
 }
+
+const testSource = @embedFile("testing.zlt");

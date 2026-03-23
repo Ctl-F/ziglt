@@ -42,7 +42,8 @@ Arrays can be "multiplied" or auto sized by a comptime integer
 [_]i32 { 0 } ** 100; // produces a 100 long zero-initialized i32 array
 
 
-Arrays of specific sizes can be treated as vector (SIMD) types and thus have SIMD operations performed on them
+## SIMD
+SIMD (Vector) types are explicit and follow Zig's model for version 0.1.
 The valid SIMD array types are:
 [2]u64/i64/f64/u32/i32/f32/u16/i16/u8/i8/bool
 [4]u32/i32/f32/u16/i16/u8/i8/bool
@@ -52,7 +53,7 @@ The valid SIMD array types are:
 An array of any other size or type cannot be treated as a SIMD vector.
 Operations that are valid on Vector Arrays:
 + - * / %
-@shuffle(...), @select(...), @abs(...), @max(...), @min(...), @reduce(...), @sqrt(...), @exp(...),, @exp2(...),
+@shuffle(...), @select(...), @abs(...), @max(...), @min(...), @reduce(...), @sqrt(...), @exp(...), @exp2(...),
 @sin(...), @cos(...), @tan(...), @round(...), @floor(...), @ceil(...),
 scalars can quickly be made into a vector with @splat(size, value)
 
@@ -90,11 +91,10 @@ if(nullable) |nonNull| { }
 while(nullable) |nonNull| { }
 
 
-
-
 ## Control Flow
 expr can be a single expression or an expression block. (defined as { expr; expr; expr; ... })
-control flow can be as a statement or embedded in an expression
+control flow can be as a statement or embedded in an expression. 
+if and switch can always be used as expressions. while and for are currently not planned to be expressions in the same way, though while(){}else{} may be considered in the future.
 
 if(condition) expr [[else expr]]
 if(nullable) |capture| expr [[else expr]]
@@ -106,8 +106,8 @@ if(nullable) |capture| expr [[else expr]]
 [[label:]] while(condition) [[continue expr]] expr [[else expr]];
 [[label:]] while(nullable) [[continue expr]] |value| expr [[else expr]];
 
-When for and while have an else handler, the else happens if the main loop body is not broken
-when for and while are embedded into an expression the result of their final expression are taken.
+when for and while have an else handler, the else happens if the main loop body is not broken.
+while and for results are still being considered and may not be supported in version 0.1.
 
 fn findFirstLargerEntry(collection: []u32, target: u32) ?u32 {
     return for(collection) |entry| RESULT: {
@@ -190,7 +190,8 @@ In this example the function gets outlined and then myMax get assigned the point
 
 Defer + ErrDefer:
 defer can be used to defer execution at the end of a block. It works in ziglt by creating an anonymous function
-with an explicity capture.
+with an explicit capture list. For version 0.1, defer REQUIRES a capture list and compiles using anonymous functions.
+Later we might refactor this to be able to access the parent scope directly.
 
 defer |capture list| body;
 
@@ -326,3 +327,39 @@ Undefined:
     var a: i32 = undefined;
 
 An imported file gets wrapped in a struct
+
+
+Update to "const" keyword:
+
+    const [label] = [expression];
+    const [label]: [type] = [expression];
+
+
+In the first instance, we are defining an AST container that will then be referenced and inlined
+in future semantic passes (constant folding).
+The second instance is constant runtime data.
+
+
+Comptime:
+    comptime is more primitive in ziglt than in zig. We will have basic constant propogation and folding.
+    comptime function will be able to generate AST nodes and types from comptime parameters.
+
+comptime fn AList(T: type) type {
+    return struct {
+        items: []T,
+        ...
+    };
+}
+
+const IntegerList = AList(i32);
+
+const list: IntegerList = IntegerList{ ... };
+
+
+Note the multiple types of const here:
+    const IntegerList = AList(i32);
+This will call AList() and generate a resulting ASTNode which will then get stored under the name "IntegerList"
+From there we create a constant (runtime-data) list that is instantiated to IntegerList. Constant popogation and folding
+will resolve the references in the ast and the above will effectually get compiled as if it were the following:
+
+const list: struct { items: []i32, ... } = struct { items: []i32, ... }{ ... };
