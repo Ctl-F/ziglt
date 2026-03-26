@@ -152,6 +152,37 @@ pub const Source = struct {
 
         return this.original[start..end];
     }
+
+    pub fn reportError(this: @This(), err: anyerror, token: Token, expected: ?TokenID) !void {
+        const position = this.getPosition(token);
+
+        std.debug.print("Error found on line {}, col {}\n", .{ position.line, position.col });
+
+        const line = blk: {
+            var i = token.start;
+            while (i > 0) : (i -= 1) {
+                if (this.original[i] == '\n') break;
+            }
+            break :blk this.original[i .. token.start + token.len];
+        };
+
+        std.debug.print("{s}\n", .{line});
+
+        var count = line.len - token.len;
+        while (count > 0) : (count -= 1) {
+            std.debug.print(" ");
+        }
+        while (count < token.len) : (count += 1) {
+            std.debug.print("~");
+        }
+        std.debug.print("\n");
+
+        if (expected) |expect| {
+            std.debug.print("Expected: {}\n", .{expect});
+        }
+
+        return err;
+    }
 };
 
 pub fn tokenize(src: *Source) Token {

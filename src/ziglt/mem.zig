@@ -108,6 +108,7 @@ pub fn ArenaAllocator(comptime ObjectType: type, comptime config: ArenaConfig) t
             while (iter.next()) |block| {
                 block.head = 0;
             }
+            this.head = this.root;
         }
 
         pub fn deinit(this: *This()) void {
