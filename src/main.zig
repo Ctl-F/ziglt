@@ -10,7 +10,7 @@ pub fn main() !void {
 
     var parser = try ziglt.Parser.init(alloc, src);
 
-    const tree = try parser.parse();
+    const tree = try parser.parseExpression(.Lowest);
     ziglt.printAST(tree);
 }
 

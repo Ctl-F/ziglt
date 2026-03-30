@@ -301,6 +301,7 @@ const Precedence = enum(u8) {
 pub const ParserError = error{
     AllocationError,
     UnexpectedToken,
+    OutOfMemory,
 };
 
 pub const Parser = struct {
@@ -348,7 +349,7 @@ pub const Parser = struct {
     }
 
     fn makeNode(this: *This, value: ?ASTNode) !*ASTNode {
-        const ptr = try this.allocator.create(ASTNode);
+        const ptr = try this.allocator.allocator().create(ASTNode);
 
         if (value) |val| {
             ptr.* = val;
@@ -381,7 +382,12 @@ pub const Parser = struct {
         return null;
     }
 
-    fn parseExpression(this: *This, minPrec: Precedence) ParserError!*ASTNode {
+    pub fn parse(this: *This) ParserError!*ASTNode {
+        const tok = this.peek();
+        if (tok.id == .Eof) return try this.makeNode(.undefined);
+    }
+
+    pub fn parseExpression(this: *This, minPrec: Precedence) ParserError!*ASTNode {
         var left = try this.parsePrefix();
 
         while (this.hasNext() and @as(u8, @intFromEnum(getPrec(this.peek().id))) > @as(u8, @intFromEnum(minPrec))) {
@@ -397,11 +403,11 @@ pub const Parser = struct {
         return switch (tok.id) {
             .ImmediateInteger => try this.makeNode(.{ .immediate = .{ .uint = std.fmt.parseInt(u128, this.source.getLexme(tok), 0) catch unreachable } }),
             .ImmediateFloat => try this.makeNode(.{ .immediate = .{ .float = std.fmt.parseFloat(f128, this.source.getLexme(tok)) catch unreachable } }),
-            .True => try this.newNode(.{ .immediate = .{ .boolean = true } }),
-            .False => try this.newNode(.{ .immediate = .{ .boolean = false } }),
-            .ImmediateString => try this.newNode(.{ .immediate = .{ .string = this.source.getLexme(tok) } }),
-            .ImmediateChar => try this.newNode(.{ .immediate = .{ .char = this.source.getLexme(tok)[1] } }), // TODO: fix char extraction to accept wide char literals
-            .Identifier => try this.newNode(.{ .identifier = .{ .lexme = this.source.getLexme(tok) } }),
+            .True => try this.makeNode(.{ .immediate = .{ .boolean = true } }),
+            .False => try this.makeNode(.{ .immediate = .{ .boolean = false } }),
+            .ImmediateString => try this.makeNode(.{ .immediate = .{ .string = this.source.getLexme(tok) } }),
+            .ImmediateChar => try this.makeNode(.{ .immediate = .{ .char = this.source.getLexme(tok)[1] } }), // TODO: fix char extraction to accept wide char literals
+            .Identifier => try this.makeNode(.{ .identifier = .{ .lexme = this.source.getLexme(tok) } }),
             .Minus, .Bang, .Tilde, .Amp, .Try => blk: {
                 const op = switch (tok.id) {
                     .Minus => UnaryOp.Negation,
@@ -412,7 +418,7 @@ pub const Parser = struct {
                     else => unreachable,
                 };
                 const expr = try this.parseExpression(.Prefix);
-                break :blk try this.newNode(.{
+                break :blk try this.makeNode(.{
                     .unary = .{
                         .op = op,
                         .expr = expr,
@@ -421,7 +427,7 @@ pub const Parser = struct {
             },
             .LeftParen => blk: {
                 if (this.peek().id == .RightParen) {
-                    return this.source.ReportError(error.UnexpectedToken, tok, null);
+                    return this.source.reportError(error.UnexpectedToken, tok, null);
                 }
 
                 const expr = try this.parseExpression(.Lowest);
@@ -480,7 +486,7 @@ pub const Parser = struct {
                     else => unreachable,
                 };
                 const right = try this.parseExpression(prec);
-                break :blk try this.newNode(.{
+                break :blk try this.makeNode(.{
                     .binary = .{
                         .op = op,
                         .left = left,
@@ -495,14 +501,14 @@ pub const Parser = struct {
                 if (this.peek().id != .RightParen) {
                     while (true) {
                         const arg_expr = try this.parseExpression(.Lowest);
-                        const arg = try this.createNode(ASTNode.Argument, .{ .expression = arg_expr, .next = null });
-                        if (last_arg) |l| l.next = arg else first_arg = arg;
+                        const arg = try this.makeNode(.{ .argument = .{ .expression = arg_expr, .next = null } });
+                        if (last_arg) |l| l.next = arg.argument else first_arg = arg.argument;
                         last_arg = arg;
                         if (!this.match(.Comma)) break;
                     }
                 }
                 _ = try this.expect(.RightParen);
-                break :blk try this.newNode(.{
+                break :blk try this.makeNode(.{
                     .call = .{
                         .name = left,
                         .args = first_arg,
@@ -512,8 +518,8 @@ pub const Parser = struct {
 
             .Period => blk: {
                 const name_tok = try this.expect(.Identifier);
-                const name = try this.newNode(.{ .identifier = .{ .lexme = this.source.getLexme(name_tok) } });
-                break :blk try this.newNode(.{
+                const name = try this.makeNode(.{ .identifier = .{ .lexme = this.source.getLexme(name_tok) } });
+                break :blk try this.makeNode(.{
                     .binary = .{
                         .op = .FieldAccess,
                         .left = left,
@@ -522,18 +528,18 @@ pub const Parser = struct {
                 });
             },
 
-            .PeriodAst => try this.newNode(.{
+            .PeriodAst => try this.makeNode(.{
                 .unary = .{ .op = .Dereference, .expr = left },
             }),
 
-            .PeriodQuest => try this.newNode(.{
+            .PeriodQuest => try this.makeNode(.{
                 .unary = .{ .op = .OptionalUnwrap, .expr = left },
             }),
 
             .LeftBracket => blk: {
                 const index = try this.parseExpression(.Lowest);
                 _ = try this.expect(.RightBracket);
-                break :blk try this.newNode(.{
+                break :blk try this.makeNode(.{
                     .binary = .{
                         .op = .IndexAccess,
                         .left = left,

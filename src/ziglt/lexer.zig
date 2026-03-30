@@ -170,12 +170,12 @@ pub const Source = struct {
 
         var count = line.len - token.len;
         while (count > 0) : (count -= 1) {
-            std.debug.print(" ");
+            std.debug.print(" ", .{});
         }
         while (count < token.len) : (count += 1) {
-            std.debug.print("~");
+            std.debug.print("~", .{});
         }
-        std.debug.print("\n");
+        std.debug.print("\n", .{});
 
         if (expected) |expect| {
             std.debug.print("Expected: {}\n", .{expect});
