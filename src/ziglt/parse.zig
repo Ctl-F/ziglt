@@ -1,302 +1,17 @@
 const std = @import("std");
 const lexer = @import("lexer.zig");
 const bytecode = @import("bytecode.zig");
-const dispatch = @import("dispatch");
+const ast = @import("ast.zig");
 
 const Token = lexer.Token;
 const Source = lexer.Source;
 const TokenID = lexer.TokenID;
 
-pub const BinaryOp = enum {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    Modulus,
-    CompareEq,
-    CompareNeq,
-    CompareLt,
-    CompareLe,
-    CompareGt,
-    CompareGe,
-    LogicalAnd,
-    LogicalOr,
-    BitwiseAnd,
-    BitwiseOr,
-    BitwiseXor,
-    BitwiseShiftLeft,
-    BitwiseShiftRight,
-    Assign,
-    NullUnwrap,
-    ErrorUnion,
-    // New operators
-    ArrayMultiply,
-    Orelse,
-    Catch,
-    FieldAccess,
-    IndexAccess,
-    AddAssign,
-    SubtractAssign,
-    MultiplyAssign,
-    DivideAssign,
-    ModulusAssign,
-    BitwiseAndAssign,
-    BitwiseOrAssign,
-    BitwiseXorAssign,
-    BitwiseShiftLeftAssign,
-    BitwiseShiftRightAssign,
-};
-
-pub const UnaryOp = enum {
-    Negation,
-    LogicalNot,
-    BitwiseNot,
-    AddressOf,
-    OptionalUnwrap,
-    Dereference,
-    Try,
-};
-
-pub const Visibility = enum { Default, Public };
-
-pub const ASTNode = union(enum) {
-    const Node = @This();
-
-    immediate: ImmediatePrimitive,
-    identifier: Identifier,
-    binary: Binary,
-    unary: Unary,
-    @"if": If,
-    @"while": While,
-    @"for": For,
-    @"switch": Switch,
-    switchProng: SwitchProng,
-    statement: Statement,
-    capture: Capture,
-    parameter: Parameter,
-    argument: Argument,
-    func: Func,
-    declaration: Declaration,
-    container: Container,
-    @"enum": Enum,
-    constDef: ConstDef,
-    constRef: ConstRef,
-    @"catch": Catch,
-    @"defer": Defer,
-    call: Call,
-    interrupt: Interrupter,
-    labelDefinition: LabelDefinition,
-    labelReference: LabelReference,
-    structInit: StructInitializer,
-    arrayInit: ArrayInitializer,
-    fieldInit: FieldInitializer,
-    import: Import,
-    type: Type,
-    undefined,
-    @"unreachable",
-
-    const ImmediatePrimitive = union(enum) {
-        uint: u128,
-        float: f128,
-        boolean: bool,
-        string: []const u8,
-        char: u8,
-    };
-
-    const Identifier = struct {
-        lexme: []const u8,
-    };
-
-    const Binary = struct {
-        op: BinaryOp,
-        left: *Node,
-        right: *Node,
-    };
-
-    const Unary = struct {
-        op: UnaryOp,
-        expr: *Node,
-    };
-
-    const If = struct {
-        condition: *Node,
-        capture: ?*Capture,
-        body: *Statement,
-        elseBlock: ?*Statement,
-    };
-
-    const While = struct {
-        condition: *Node,
-        continueExpression: ?*Node,
-        capture: ?*Capture,
-        body: *Statement,
-        elseBlock: ?*Statement,
-    };
-
-    const For = struct {
-        collection: *Node,
-        capture: ?*Capture,
-        body: *Statement,
-        elseBlock: ?*Statement,
-    };
-
-    const Switch = struct {
-        const Prong = struct { case: *SwitchProng, next: ?*Prong };
-
-        condition: *Node,
-        prongs: *Prong,
-    };
-
-    const SwitchProng = struct {
-        value: *Node,
-        capture: ?*Capture,
-        payload: ?*Node,
-    };
-
-    const Statement = struct {
-        payload: *Node,
-        next: ?*Statement,
-    };
-
-    // |a, b, c|
-    const Capture = struct {
-        identifier: *Identifier,
-        next: ?*Capture,
-    };
-
-    // a: type
-    const Parameter = struct {
-        name: *Identifier,
-        typeName: *Node,
-        next: ?*Parameter,
-    };
-
-    const Argument = struct {
-        expression: *Node,
-        next: ?*Argument,
-    };
-
-    const Func = struct {
-        visiblity: Visibility,
-        isComptime: bool,
-        name: ?*Identifier,
-        parameters: ?*Parameter,
-        returnType: *Node,
-        body: *Statement,
-        next: ?*Func,
-    };
-
-    const Declaration = struct {
-        mode: Visibility,
-        name: *Identifier,
-        typeName: *Node,
-        expression: *Node,
-        next: ?*Declaration,
-    };
-
-    const Container = struct {
-        pub const Kind = enum { Struct, Union, Enum };
-
-        kind: Kind,
-        visibility: Visibility,
-        constants: ?*ConstDef,
-        functions: ?*Func,
-        members: ?*Declaration,
-    };
-
-    const Enum = struct {
-        const Member = struct { name: *Identifier, value: ?*Node, next: ?*Member };
-
-        visibility: Visibility,
-        backing: ?*Node,
-        members: ?*Member,
-    };
-
-    const ConstDef = struct {
-        visibility: Visibility,
-        name: *Identifier,
-        payload: *Node,
-        next: ?*ConstDef,
-    };
-    const ConstRef = struct {
-        referenced: *ConstDef,
-    };
-
-    const Catch = struct {
-        capture: ?*Capture,
-        body: *Statement,
-    };
-
-    const Defer = struct {
-        isError: bool,
-        capture: ?*Capture,
-        expression: *Node,
-    };
-
-    const Call = struct {
-        name: *Node,
-        args: ?*Argument,
-    };
-
-    const Interrupter = struct {
-        pub const Kind = enum { Break, Continue, Return };
-        kind: Kind,
-        label: ?*LabelReference,
-        value: ?*Node,
-    };
-
-    const LabelDefinition = struct {
-        name: *Identifier,
-    };
-    const LabelReference = struct {
-        name: *Identifier,
-    };
-
-    const StructInitializer = struct {
-        const InitializerList = struct { field: *FieldInitializer, next: ?*InitializerList };
-
-        typeName: *Node,
-        initializers: ?*InitializerList,
-    };
-
-    const ArrayInitializer = struct {
-        const Value = struct { expr: *Node, next: ?*Value };
-
-        typeID: *Node,
-        size: *Node,
-        isConst: bool,
-        values: *Value,
-    };
-
-    const FieldInitializer = struct {
-        name: *Identifier,
-        value: *Node,
-    };
-
-    const Import = struct {
-        path: []const u8,
-    };
-
-    const Type = struct {
-        expr: *Node,
-    };
-};
-
-const Precedence = enum(u8) {
-    Lowest, // values
-    Assign, // = += *= etc.
-    Or,
-    And,
-    Compare,
-    Bitwise, // & ^ | orelse catch
-    BitShift, // << >>
-    Sum, // + -
-    Product, // * / %
-    Prefix, // -X ~X !X &X
-    Initializer, // X{}
-    ErrorUnion, // a!b
-    Accessor, // X() X[] X.Y X.* X.?
-};
+pub const ASTNode = ast.ASTNode;
+const Visibility = ast.Visibility;
+const BinaryOp = ast.BinaryOp;
+const UnaryOp = ast.UnaryOp;
+const Precedence = ast.Precedence;
 
 pub const ParserError = error{
     AllocationError,
@@ -358,39 +73,22 @@ pub const Parser = struct {
         return ptr;
     }
 
-    fn getPrec(id: lexer.TokenID) Precedence {
-        return switch (id) {
-            .Equal, .PlusEq, .MinusEq, .AsteriskEq, .ForwardSlEq, .PercentEq, .AmpEq, .PipeEq, .CaretEq, .LessLessEq, .GreaterGreaterEq => .Assign,
-            .Or => .Or,
-            .And => .And,
-            .DoubleEqual, .NotEqual, .Less, .LessEqual, .Greater, .GreaterEqual => .Compare,
-            .Amp, .Pipe, .Caret, .Orelse, .Catch => .Bitwise,
-            .LessLess, .GreaterGreater => .BitShift,
-            .Plus, .Minus => .Sum,
-            .Asterisk, .ForwardSlash, .Percent => .Product,
-            .LeftCurl => .Initializer,
-            .Bang => .ErrorUnion,
-            .LeftParen, .LeftBracket, .Period, .PeriodAst, .PeriodQuest => .Accessor,
-            else => .Lowest,
-        };
-    }
-
     fn expect(this: *This, id: lexer.TokenID) ?Token {
         if (this.peek().id == id) {
-            return this.next;
+            return this.next();
         }
         return null;
     }
 
-    pub fn parse(this: *This) ParserError!*ASTNode {
-        const tok = this.peek();
-        if (tok.id == .Eof) return try this.makeNode(.undefined);
-    }
+    // pub fn parse(this: *This) ParserError!*ASTNode {
+    //     const tok = this.peek();
+    //     if (tok.id == .Eof) return try this.makeNode(.undefined);
+    // }
 
     pub fn parseExpression(this: *This, minPrec: Precedence) ParserError!*ASTNode {
         var left = try this.parsePrefix();
 
-        while (this.hasNext() and @as(u8, @intFromEnum(getPrec(this.peek().id))) > @as(u8, @intFromEnum(minPrec))) {
+        while (this.hasNext() and @as(u8, @intFromEnum(Precedence.fromToken(this.peek().id))) > @as(u8, @intFromEnum(minPrec))) {
             left = try this.parseInfix(left);
         }
 
@@ -445,7 +143,7 @@ pub const Parser = struct {
 
     fn parseInfix(this: *This, left: *ASTNode) ParserError!*ASTNode {
         const tok = this.next();
-        const prec = getPrec(tok.id);
+        const prec = Precedence.fromToken(tok.id);
 
         return switch (tok.id) {
             .Plus, .Minus, .Asterisk, .ForwardSlash, .Percent, .DoubleEqual, .NotEqual, .Less, .LessEqual, .Greater, .GreaterEqual, .And, .Or, .Amp, .Pipe, .Caret, .LessLess, .GreaterGreater, .AsteriskAsterisk, .Orelse, .Catch, .Bang, .Equal, .PlusEq, .MinusEq, .AsteriskEq, .ForwardSlEq, .PercentEq, .AmpEq, .PipeEq, .CaretEq, .LessLessEq, .GreaterGreaterEq => blk: {
@@ -501,13 +199,17 @@ pub const Parser = struct {
                 if (this.peek().id != .RightParen) {
                     while (true) {
                         const arg_expr = try this.parseExpression(.Lowest);
-                        const arg = try this.makeNode(.{ .argument = .{ .expression = arg_expr, .next = null } });
-                        if (last_arg) |l| l.next = arg.argument else first_arg = arg.argument;
-                        last_arg = arg;
-                        if (!this.match(.Comma)) break;
+                        var arg = try this.makeNode(.{ .argument = .{ .expression = arg_expr, .next = null } });
+                        if (last_arg) |l| l.next = &arg.argument else first_arg = &arg.argument;
+                        last_arg = &arg.argument;
+
+                        if (this.expect(.Comma) != null) continue;
+                        break;
                     }
                 }
-                _ = try this.expect(.RightParen);
+                if (this.expect(.RightParen) == null) {
+                    return try this.source.reportError(error.UnexpectedToken, this.peek(), .RightParen);
+                }
                 break :blk try this.makeNode(.{
                     .call = .{
                         .name = left,
@@ -517,7 +219,7 @@ pub const Parser = struct {
             },
 
             .Period => blk: {
-                const name_tok = try this.expect(.Identifier);
+                const name_tok = if (this.expect(.Identifier)) |id| id else return try this.source.reportError(error.UnexpectedToken, this.peek(), .Identifier);
                 const name = try this.makeNode(.{ .identifier = .{ .lexme = this.source.getLexme(name_tok) } });
                 break :blk try this.makeNode(.{
                     .binary = .{
@@ -538,7 +240,7 @@ pub const Parser = struct {
 
             .LeftBracket => blk: {
                 const index = try this.parseExpression(.Lowest);
-                _ = try this.expect(.RightBracket);
+                if (this.expect(.RightBracket) == null) return try this.source.reportError(error.UnexpectedToken, this.peek(), .RightBracket);
                 break :blk try this.makeNode(.{
                     .binary = .{
                         .op = .IndexAccess,
@@ -554,3 +256,192 @@ pub const Parser = struct {
         };
     }
 };
+
+pub fn printAST(node: *const ASTNode) void {
+    printNode(node, "", true);
+}
+
+fn printNode(node: *const ASTNode, prefix: []const u8, is_last: bool) void {
+    // branch drawing
+    if (prefix.len > 0) {
+        std.debug.print("{s}", .{prefix});
+        std.debug.print("{s}", .{if (is_last) "└─ " else "├─ "});
+    }
+
+    switch (node.*) {
+        .immediate => |imm| {
+            switch (imm) {
+                .uint => |v| std.debug.print("Int({d})\n", .{v}),
+                .float => |v| std.debug.print("Float({})\n", .{v}),
+                .boolean => |v| std.debug.print("Bool({})\n", .{v}),
+                .string => |v| std.debug.print("String(\"{s}\")\n", .{v}),
+                .char => |v| std.debug.print("Char({d})\n", .{v}),
+            }
+        },
+
+        .identifier => |ident| {
+            std.debug.print("Ident({s})\n", .{ident.lexme});
+        },
+
+        .unary => |u| {
+            std.debug.print("Unary({s})\n", .{unaryOpToString(u.op)});
+            const new_prefix = nextPrefix(prefix, is_last);
+            printNode(u.expr, new_prefix, true);
+        },
+
+        .binary => |b| {
+            std.debug.print("Binary({s})\n", .{binaryOpToString(b.op)});
+            const new_prefix = nextPrefix(prefix, is_last);
+            printNode(b.left, new_prefix, false);
+            printNode(b.right, new_prefix, true);
+        },
+
+        .@"if" => |i| {
+            std.debug.print("If\n", .{});
+            const new_prefix = nextPrefix(prefix, is_last);
+            printNode(i.condition, new_prefix, false);
+            printStatementList(i.body, new_prefix, i.elseBlock == null);
+            if (i.elseBlock) |eb| {
+                printStatementList(eb, new_prefix, true);
+            }
+        },
+        .@"while" => |w| {
+            std.debug.print("While\n", .{});
+            const new_prefix = nextPrefix(prefix, is_last);
+            printNode(w.condition, new_prefix, false);
+            if (w.continueExpression) |c| printNode(c, new_prefix, false);
+            printStatementList(w.body, new_prefix, w.elseBlock == null);
+            if (w.elseBlock) |eb| {
+                printStatementList(eb, new_prefix, true);
+            }
+        },
+        .func => |f| {
+            std.debug.print("Func({s})\n", .{if (f.name) |n| n.lexme else "anonymous"});
+            const new_prefix = nextPrefix(prefix, is_last);
+            var curr = f.parameters;
+            while (curr) |p| {
+                std.debug.print("{s}", .{new_prefix});
+                std.debug.print("├─ Param({s})\n", .{p.name.lexme});
+                printNode(p.typeName, nextPrefix(new_prefix, false), true);
+                curr = p.next;
+            }
+            printNode(f.returnType, new_prefix, false);
+            printStatementList(f.body, new_prefix, true);
+        },
+        .declaration => |d| {
+            std.debug.print("Decl({s})\n", .{d.name.lexme});
+            const new_prefix = nextPrefix(prefix, is_last);
+            printNode(d.typeName, new_prefix, false);
+            printNode(d.expression, new_prefix, true);
+        },
+        .statement => |s| {
+            std.debug.print("Block\n", .{});
+            printStatementList(&s, prefix, is_last);
+        },
+        .call => |c| {
+            std.debug.print("Call\n", .{});
+            const new_prefix = nextPrefix(prefix, is_last);
+            printNode(c.name, new_prefix, c.args == null);
+            var curr = c.args;
+            while (curr) |a| {
+                printNode(a.expression, new_prefix, a.next == null);
+                curr = a.next;
+            }
+        },
+        .interrupt => |i| {
+            std.debug.print("Interrupt({s})\n", .{@tagName(i.kind)});
+            if (i.value) |v| {
+                const new_prefix = nextPrefix(prefix, is_last);
+                printNode(v, new_prefix, true);
+            }
+        },
+        .@"defer" => |d| {
+            std.debug.print("Defer({s})\n", .{if (d.isError) "errdefer" else "defer"});
+            const new_prefix = nextPrefix(prefix, is_last);
+            printNode(d.expression, new_prefix, true);
+        },
+        .type => |t| {
+            std.debug.print("TypeNode\n", .{});
+            const new_prefix = nextPrefix(prefix, is_last);
+            printNode(t.expr, new_prefix, true);
+        },
+        .undefined => std.debug.print("Undefined\n", .{}),
+        .@"unreachable" => std.debug.print("Unreachable\n", .{}),
+        else => std.debug.print("Node({s})\n", .{@tagName(node.*)}),
+    }
+}
+
+fn binaryOpToString(op: BinaryOp) []const u8 {
+    return switch (op) {
+        .Add => "+",
+        .Subtract => "-",
+        .Multiply => "*",
+        .Divide => "/",
+        .Modulus => "%",
+        .CompareEq => "==",
+        .CompareNeq => "!=",
+        .CompareLt => "<",
+        .CompareLe => "<=",
+        .CompareGt => ">",
+        .CompareGe => ">=",
+        .LogicalAnd => "and",
+        .LogicalOr => "or",
+        .BitwiseAnd => "&",
+        .BitwiseOr => "|",
+        .BitwiseXor => "^",
+        .BitwiseShiftLeft => "<<",
+        .BitwiseShiftRight => ">>",
+        .Assign => "=",
+        .NullUnwrap => ".?",
+        .ErrorUnion => "!",
+        .ArrayMultiply => "**",
+        .Orelse => "orelse",
+        .Catch => "catch",
+        .FieldAccess => ".",
+        .IndexAccess => "[]",
+        .AddAssign => "+=",
+        .SubtractAssign => "-=",
+        .MultiplyAssign => "*=",
+        .DivideAssign => "/=",
+        .ModulusAssign => "%=",
+        .BitwiseAndAssign => "&=",
+        .BitwiseOrAssign => "|=",
+        .BitwiseXorAssign => "^=",
+        .BitwiseShiftLeftAssign => "<<=",
+        .BitwiseShiftRightAssign => ">>=",
+    };
+}
+
+fn unaryOpToString(op: UnaryOp) []const u8 {
+    return switch (op) {
+        .Negation => "-",
+        .LogicalNot => "!",
+        .BitwiseNot => "~",
+        .AddressOf => "&",
+        .OptionalUnwrap => ".?",
+        .Dereference => ".*",
+        .Try => "try",
+    };
+}
+
+fn nextPrefix(current: []const u8, is_last: bool) []const u8 {
+    const suffix = if (is_last) "   " else "│  ";
+    return std.mem.concat(std.heap.page_allocator, u8, &[_][]const u8{
+        current,
+        suffix,
+    }) catch unreachable;
+}
+
+fn printStatementList(first: *const ASTNode.Statement, prefix: []const u8, is_last: bool) void {
+    var curr: ?*const ASTNode.Statement = first;
+    const new_prefix = nextPrefix(prefix, is_last);
+    while (curr) |s| {
+        parseNode(s.payload, new_prefix, s.next == null);
+        curr = s.next;
+    }
+}
+fn parseNode(node: *const ASTNode, prefix: []const u8, is_last: bool) void {
+    _ = prefix;
+    _ = is_last;
+    std.debug.print("Node({s})\n", .{@tagName(node.*)});
+}

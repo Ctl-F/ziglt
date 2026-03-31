@@ -1,4 +1,7 @@
 const std = @import("std");
+const parser = @import("parse.zig");
+
+const ParseError = parser.ParserError;
 
 pub const TokenID = enum {
     Invalid,
@@ -153,7 +156,7 @@ pub const Source = struct {
         return this.original[start..end];
     }
 
-    pub fn reportError(this: @This(), err: anyerror, token: Token, expected: ?TokenID) !void {
+    pub fn reportError(this: @This(), err: ParseError, token: Token, expected: ?TokenID) ParseError!*parser.ASTNode {
         const position = this.getPosition(token);
 
         std.debug.print("Error found on line {}, col {}\n", .{ position.line, position.col });

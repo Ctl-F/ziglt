@@ -6,7 +6,7 @@ pub fn main() !void {
     defer allocator.deinit();
     const alloc = allocator.allocator();
 
-    const src = ziglt.Source.make("Testing", "1 + 2 * (3 - 5 << 6 & foo[bar])");
+    const src = ziglt.Source.make("Testing", "1 + 2 * (3 - 5 << 6 & foo[bar.baz.foo()[1]()])");
 
     var parser = try ziglt.Parser.init(alloc, src);
 
