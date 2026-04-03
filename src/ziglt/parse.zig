@@ -2,6 +2,7 @@ const std = @import("std");
 const lexer = @import("lexer.zig");
 const bytecode = @import("bytecode.zig");
 const ast = @import("ast.zig");
+const types = @import("types.zig");
 
 const Token = lexer.Token;
 const Source = lexer.Source;
@@ -22,41 +23,91 @@ pub const ParserError = error{
 pub const Parser = struct {
     const This = @This();
 
+    const SourceScope = struct {
+        source: Source,
+        window: [2]Token = [_]Token{ Token.Eof, Token.Eof },
+        heldToken: ?Token = null,
+    };
+
+    parentAllocator: std.mem.Allocator,
     allocator: std.heap.ArenaAllocator,
-    source: Source,
-    window: [2]Token = [_]Token{ Token.Eof, Token.Eof },
-    heldToken: ?Token = null,
+    tableAllocator: std.heap.ArenaAllocator,
+    symbolAllocator: std.heap.ArenaAllocator,
+    sources: std.ArrayList(SourceScope),
+    activeSources: std.ArrayList(u16),
+    types: types.TypeRegistry,
+    symbols: types.SymbolTable,
 
     pub fn init(allocator: std.mem.Allocator, source: Source) !This {
         const alloc = std.heap.ArenaAllocator.init(allocator);
+        var tableAllocator = std.heap.ArenaAllocator.init(allocator);
+        var symbolAllocator = std.heap.ArenaAllocator.init(allocator);
 
-        var inst = This{ .allocator = alloc, .source = source };
-        inst.window[0] = lexer.tokenize(&inst.source);
-        inst.window[1] = lexer.tokenize(&inst.source);
+        errdefer alloc.deinit();
+        errdefer tableAllocator.deinit();
+        errdefer symbolAllocator.deinit();
+
+        var inst = This{
+            .parentAllocator = allocator,
+            .allocator = alloc,
+            .tableAllocator = tableAllocator,
+            .symbolAllocator = symbolAllocator,
+            .sources = std.ArrayList(SourceScope).empty,
+            .activeSources = std.ArrayList(u16).empty,
+            .types = try types.TypeRegistry.default(tableAllocator.allocator()),
+            .symbols = try types.SymbolTable.init(symbolAllocator.allocator()),
+        };
+
+        var initialSource = SourceScope{
+            .source = source,
+        };
+        initialSource.window[0] = lexer.tokenize(&initialSource.source, 0);
+        initialSource.window[1] = lexer.tokenize(&initialSource.source, 0);
+
+        try inst.sources.append(inst.parentAllocator, initialSource);
+        errdefer inst.sources.deinit(inst.parentAllocator);
+
+        try inst.activeSources.append(inst.parentAllocator, 0);
+        errdefer inst.sources.deinit(inst.parentAllocator);
 
         return inst;
     }
 
+    pub fn deinit(this: *This) void {
+        this.allocator.deinit();
+        this.tableAllocator.deinit();
+        this.symbolAllocator.deinit();
+    }
+
+    inline fn getActiveSource(this: *This) *SourceScope {
+        if (this.activeSources.items.len == 0) unreachable;
+        return &this.sources.items[this.activeSources.getLast()];
+    }
+
     fn peek(this: *This) Token {
-        return this.heldToken orelse this.window[0];
+        const current = this.getActiveSource();
+        return current.heldToken orelse current.window[0];
     }
 
     fn next(this: *This) Token {
-        if (this.heldToken) |tok| {
-            this.heldToken = null;
+        const current = this.getActiveSource();
+
+        if (current.heldToken) |tok| {
+            current.heldToken = null;
             return tok;
         }
 
-        const token = this.window[0];
-        this.window[0] = this.window[1];
-        this.window[1] = lexer.tokenize(&this.source);
+        const token = current.window[0];
+        current.window[0] = current.window[1];
+        current.window[1] = lexer.tokenize(&current.source, this.activeSources.getLast());
 
         return token;
     }
 
     pub fn putBack(this: *This, tok: Token) void {
         std.debug.assert(this.heldToken == null);
-        this.heldToken = tok;
+        const current = this.getActiveSource();
+        current.heldToken = tok;
     }
 
     fn hasNext(this: *This) bool {
@@ -80,10 +131,20 @@ pub const Parser = struct {
         return null;
     }
 
-    // pub fn parse(this: *This) ParserError!*ASTNode {
-    //     const tok = this.peek();
-    //     if (tok.id == .Eof) return try this.makeNode(.undefined);
-    // }
+    fn expectNext(this: *This, id: lexer.TokenID) ParserError!Token {
+        if (this.expect(id)) |tok| return tok else return error.UnexpectedToken;
+    }
+
+    fn parseStruct(this: *This) ParserError!*ASTNode {
+        _ = this.expectNext(.Struct);
+        _ = this.expectNext(.LeftBracket);
+
+        var structDefinition = ASTNode{ .structInit = .{} };
+
+        //...
+
+        _ = this.expectNext(.RightBracket);
+    }
 
     pub fn parseExpression(this: *This, minPrec: Precedence) ParserError!*ASTNode {
         var left = try this.parsePrefix();
@@ -99,13 +160,13 @@ pub const Parser = struct {
         const tok = this.next();
 
         return switch (tok.id) {
-            .ImmediateInteger => try this.makeNode(.{ .immediate = .{ .uint = std.fmt.parseInt(u128, this.source.getLexme(tok), 0) catch unreachable } }),
-            .ImmediateFloat => try this.makeNode(.{ .immediate = .{ .float = std.fmt.parseFloat(f128, this.source.getLexme(tok)) catch unreachable } }),
+            .ImmediateInteger => try this.makeNode(.{ .immediate = .{ .uint = std.fmt.parseInt(u128, this.getActiveSource().source.getLexme(tok), 0) catch unreachable } }),
+            .ImmediateFloat => try this.makeNode(.{ .immediate = .{ .float = std.fmt.parseFloat(f128, this.getActiveSource().source.getLexme(tok)) catch unreachable } }),
             .True => try this.makeNode(.{ .immediate = .{ .boolean = true } }),
             .False => try this.makeNode(.{ .immediate = .{ .boolean = false } }),
-            .ImmediateString => try this.makeNode(.{ .immediate = .{ .string = this.source.getLexme(tok) } }),
-            .ImmediateChar => try this.makeNode(.{ .immediate = .{ .char = this.source.getLexme(tok)[1] } }), // TODO: fix char extraction to accept wide char literals
-            .Identifier => try this.makeNode(.{ .identifier = .{ .lexme = this.source.getLexme(tok) } }),
+            .ImmediateString => try this.makeNode(.{ .immediate = .{ .string = this.getActiveSource().source.getLexme(tok) } }),
+            .ImmediateChar => try this.makeNode(.{ .immediate = .{ .char = this.getActiveSource().source.getLexme(tok)[1] } }), // TODO: fix char extraction to accept wide char literals
+            .Identifier => try this.makeNode(.{ .identifier = .{ .lexme = this.getActiveSource().source.getLexme(tok) } }),
             .Minus, .Bang, .Tilde, .Amp, .Try => blk: {
                 const op = switch (tok.id) {
                     .Minus => UnaryOp.Negation,
@@ -125,20 +186,25 @@ pub const Parser = struct {
             },
             .LeftParen => blk: {
                 if (this.peek().id == .RightParen) {
-                    return this.source.reportError(error.UnexpectedToken, tok, null);
+                    return try this.reportError(error.UnexpectedToken, tok, null);
                 }
 
                 const expr = try this.parseExpression(.Lowest);
                 if (this.expect(.RightParen) == null) {
-                    return this.source.reportError(error.UnexpectedToken, tok, .RightParen);
+                    return try this.reportError(error.UnexpectedToken, tok, .RightParen);
                 }
                 break :blk expr;
             },
 
             else => {
-                return this.source.reportError(error.UnexpectedToken, tok, null);
+                return try this.reportError(error.UnexpectedToken, tok, null);
             },
         };
+    }
+
+    fn reportError(this: *This, err: ParserError, token: Token, expected: ?TokenID) ParserError!*ASTNode {
+        std.debug.assert(token.sourceID <= this.sources.items.len);
+        return try this.sources.items[token.sourceID].source.reportError(err, token, expected);
     }
 
     fn parseInfix(this: *This, left: *ASTNode) ParserError!*ASTNode {
@@ -208,7 +274,7 @@ pub const Parser = struct {
                     }
                 }
                 if (this.expect(.RightParen) == null) {
-                    return try this.source.reportError(error.UnexpectedToken, this.peek(), .RightParen);
+                    return try this.reportError(error.UnexpectedToken, this.peek(), .RightParen);
                 }
                 break :blk try this.makeNode(.{
                     .call = .{
@@ -219,8 +285,8 @@ pub const Parser = struct {
             },
 
             .Period => blk: {
-                const name_tok = if (this.expect(.Identifier)) |id| id else return try this.source.reportError(error.UnexpectedToken, this.peek(), .Identifier);
-                const name = try this.makeNode(.{ .identifier = .{ .lexme = this.source.getLexme(name_tok) } });
+                const name_tok = if (this.expect(.Identifier)) |id| id else return try this.reportError(error.UnexpectedToken, this.peek(), .Identifier);
+                const name = try this.makeNode(.{ .identifier = .{ .lexme = this.getActiveSource().source.getLexme(name_tok) } });
                 break :blk try this.makeNode(.{
                     .binary = .{
                         .op = .FieldAccess,
@@ -240,7 +306,7 @@ pub const Parser = struct {
 
             .LeftBracket => blk: {
                 const index = try this.parseExpression(.Lowest);
-                if (this.expect(.RightBracket) == null) return try this.source.reportError(error.UnexpectedToken, this.peek(), .RightBracket);
+                if (this.expect(.RightBracket) == null) return try this.reportError(error.UnexpectedToken, this.peek(), .RightBracket);
                 break :blk try this.makeNode(.{
                     .binary = .{
                         .op = .IndexAccess,
@@ -251,7 +317,7 @@ pub const Parser = struct {
             },
 
             else => {
-                return this.source.reportError(error.UnexpectedToken, tok, null);
+                return this.reportError(error.UnexpectedToken, tok, null);
             },
         };
     }

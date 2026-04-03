@@ -1,4 +1,5 @@
 const lexer = @import("lexer.zig");
+const list = @import("linkedList.zig");
 
 pub const ASTNode = union(enum) {
     const Node = @This();
@@ -82,10 +83,8 @@ pub const ASTNode = union(enum) {
     };
 
     pub const Switch = struct {
-        pub const Prong = struct { case: *SwitchProng, next: ?*Prong };
-
         condition: *Node,
-        prongs: *Prong,
+        prongs: list.LinkedList(*SwitchProng),
     };
 
     pub const SwitchProng = struct {
@@ -94,37 +93,44 @@ pub const ASTNode = union(enum) {
         payload: ?*Node,
     };
 
-    pub const Statement = struct {
-        payload: *Node,
-        next: ?*Statement,
-    };
+    pub const Statement = list.LinkedList(*Node);
+
+    // pub const Statement = struct {
+
+    //     payload: *Node,
+    //     next: ?*Statement,
+    // };
 
     // |a, b, c|
-    pub const Capture = struct {
-        identifier: *Identifier,
-        next: ?*Capture,
-    };
+    pub const Capture = list.LinkedList(*Identifier);
+    //struct {
+    //   identifier: *Identifier,
+    //  next: ?*Capture,
+    //};
 
     // a: type
-    pub const Parameter = struct {
+    pub const Param = struct {
         name: *Identifier,
         typeName: *Node,
-        next: ?*Parameter,
+        //next: ?*Parameter,
     };
 
-    pub const Argument = struct {
-        expression: *Node,
-        next: ?*Argument,
-    };
+    pub const Parameter = list.LinkedList(*Param);
+    pub const Argument = list.LinkedList(*Node);
+
+    // pub const Argument = struct {
+    //     expression: *Node,
+    //     next: ?*Argument,
+    // };
 
     pub const Func = struct {
         visiblity: Visibility,
-        isComptime: bool,
+        flags: packed struct(u8) { Comptime: bool, Inline: bool, padding: u6 },
         name: ?*Identifier,
         parameters: ?*Parameter,
         returnType: *Node,
         body: *Statement,
-        next: ?*Func,
+        //next: ?*Func,
     };
 
     pub const Declaration = struct {
@@ -132,7 +138,7 @@ pub const ASTNode = union(enum) {
         name: *Identifier,
         typeName: *Node,
         expression: *Node,
-        next: ?*Declaration,
+        //next: ?*Declaration,
     };
 
     pub const Container = struct {

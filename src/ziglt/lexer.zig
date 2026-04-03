@@ -102,6 +102,7 @@ pub const Token = struct {
     id: TokenID,
     start: u32,
     len: u32,
+    sourceID: u16 = 0xFFFF,
 
     pub const Error = @This(){ .id = .Invalid, .start = 0, .len = 0 };
     pub const Eof = @This(){ .id = .Eof, .start = std.math.maxInt(u32), .len = std.math.maxInt(u32) };
@@ -188,7 +189,7 @@ pub const Source = struct {
     }
 };
 
-pub fn tokenize(src: *Source) Token {
+pub fn tokenize(src: *Source, sourceID: u16) Token {
     if (src.input.len == 0) return Token.Eof;
 
     if (tokenizeWhitespace(src)) |_| {
@@ -199,7 +200,7 @@ pub fn tokenize(src: *Source) Token {
 
     const len = src.input.len;
 
-    const token = switch (first) {
+    var token = switch (first) {
         'A'...'Z', 'a'...'z', '_' => tokenizeIdentifier(src),
         '0'...'9' => tokenizeNumber(src),
         '/' => tokenizeCommentOrOperator(src),
@@ -209,6 +210,8 @@ pub fn tokenize(src: *Source) Token {
     };
 
     std.debug.assert(src.input.len < len);
+
+    token.sourceID = sourceID;
 
     return token;
 }
@@ -612,6 +615,7 @@ fn createToken(src: *Source, len: u32, id: TokenID) Token {
         .id = id,
         .start = src.consumed,
         .len = len,
+        .sourceID = 0xFFFF,
     };
 }
 
